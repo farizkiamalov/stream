@@ -12,6 +12,11 @@
     pre { background:#111; color:#0f0; padding:10px; border-radius:6px; max-height:240px; overflow:auto;}
     table { border-collapse: collapse; }
     th, td { border:1px solid #ccc; padding:6px 8px; }
+    .pill { padding:2px 6px; border-radius:4px; color:#fff; }
+    .ok-green { background:#2da44e; }
+    .ok-yellow { background:#b88700; }
+    .ok-red { background:#d1242f; }
+    .muted { color:#555; }
   </style>
 </head>
 <body>
@@ -39,16 +44,17 @@
   </div>
   <div class="row" style="border:1px solid #ddd;padding:10px;border-radius:8px;">
     <h3 style="margin:4px 0 8px;">Сеть</h3>
-    <div style="margin-bottom:8px;">
+    <div style="margin-bottom:8px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <b>Режим сейчас:</b> <span id="net_mode">…</span>
       &nbsp;|&nbsp;
       <b>AP SSID:</b> <span id="ap_ssid">…</span>
       &nbsp;|&nbsp;
       <b>WAN:</b> <span id="wan_line">—</span>
       &nbsp;|&nbsp;
-      <b>Интернет:</b> <span id="wan_inet">—</span>
+      <b>Интернет:</b> <span id="wan_inet" class="pill muted">—</span>
       &nbsp;|&nbsp;
-      <b>Сигнал:</b> <span id="wan_signal">—</span>
+      <b>Сигнал:</b> <span id="wan_signal" class="pill muted">—</span>
+      <button id="pingBtn" onclick="pingNow()">Проверить интернет</button>
     </div>
     <div style="display:flex; gap:24px; flex-wrap:wrap;">
       <div style="min-width:280px;">
@@ -202,10 +208,30 @@ async function refreshNetwork(){
   const wanLine = (wan?.wan_dev ? (wan.wan_dev + (wan?.wan_ssid? ` (${wan.wan_ssid})`:'') + (wan?.wan_ip? ` ${wan.wan_ip}`:'') + (wan?.wan_gw? ` → ${wan.wan_gw}`:'')) : '—');
   document.getElementById('wan_line').textContent = wanLine;
   const inet = j.internet;
-  document.getElementById('wan_inet').textContent = (inet?.ok ? (`OK ${Math.round(inet.ms)} ms via ${inet.host}`) : 'нет');
-  const sig = (wan?.signal_dbm != null ? `${wan.signal_dbm} dBm` : '—');
-  const rate = (wan?.tx_bitrate_mbps ? `, tx ${wan.tx_bitrate_mbps} Mbps` : '') + (wan?.rx_bitrate_mbps ? `, rx ${wan.rx_bitrate_mbps} Mbps` : '');
-  document.getElementById('wan_signal').textContent = sig + rate;
+    const inetEl = document.getElementById('wan_inet');
+    const sigEl = document.getElementById('wan_signal');
+    // Reset classes
+    inetEl.className = 'pill';
+    sigEl.className = 'pill';
+    // Internet coloring
+    if(inet?.ok){
+      const ms = Math.round(inet.ms);
+      inetEl.textContent = `OK ${ms} ms`;
+      inetEl.classList.add(ms <= 50 ? 'ok-green' : (ms <= 120 ? 'ok-yellow' : 'ok-red'));
+    } else {
+      inetEl.textContent = 'нет';
+      inetEl.classList.add('ok-red');
+    }
+    // Signal coloring
+    if(wan && wan.signal_dbm != null){
+      const dbm = wan.signal_dbm;
+      const rate = (wan?.tx_bitrate_mbps ? `, tx ${wan.tx_bitrate_mbps} Mbps` : '') + (wan?.rx_bitrate_mbps ? `, rx ${wan.rx_bitrate_mbps} Mbps` : '');
+      sigEl.textContent = `${dbm} dBm${rate}`;
+      sigEl.classList.add(dbm >= -60 ? 'ok-green' : (dbm >= -75 ? 'ok-yellow' : 'ok-red'));
+    } else {
+      sigEl.textContent = '—';
+      sigEl.classList.add('muted');
+    }
     // Prefill inputs with current values
     document.getElementById('ap_set_ssid').value = j.ap?.ssid || '';
     document.getElementById('ap_set_pass').value = '';
@@ -247,6 +273,19 @@ async function saveClient(){
     refreshNetwork();
   }catch(e){
     st.textContent = 'ошибка: ' + e.message;
+  }
+}
+
+async function pingNow(){
+  const btn = document.getElementById('pingBtn');
+  const el = document.getElementById('wan_inet');
+  btn.disabled = true;
+  el.textContent = 'проверяем…';
+  el.className = 'pill muted';
+  try{
+    await refreshNetwork();
+  } finally {
+    setTimeout(()=>{ btn.disabled = false; }, 800);
   }
 }
 
