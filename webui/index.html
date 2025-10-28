@@ -37,6 +37,35 @@
     <b>Клиенты (wlan0):</b>
     <table id="clients"><thead><tr><th>IP</th><th>MAC</th><th>Имя</th></tr></thead><tbody></tbody></table>
   </div>
+  <div class="row" style="border:1px solid #ddd;padding:10px;border-radius:8px;">
+    <h3 style="margin:4px 0 8px;">Сеть</h3>
+    <div style="margin-bottom:8px;">
+      <b>Режим сейчас:</b> <span id="net_mode">…</span>
+      &nbsp;|&nbsp;
+      <b>AP SSID:</b> <span id="ap_ssid">…</span>
+      &nbsp;|&nbsp;
+      <b>Подключено к (клиент):</b> <span id="cli_connected">—</span>
+      &nbsp;|&nbsp;
+      <b>IP wlan0:</b> <span id="cli_ip">—</span>
+    </div>
+    <div style="display:flex; gap:24px; flex-wrap:wrap;">
+      <div style="min-width:280px;">
+        <div style="font-weight:bold;">Точка доступа (AP)</div>
+        <div>SSID: <input id="ap_set_ssid" placeholder="AR-HOTSPOT" /></div>
+        <div>Пароль: <input id="ap_set_pass" type="password" placeholder="(оставьте пустым чтобы не менять)" /></div>
+        <button onclick="saveAp()">Сохранить и применить</button>
+        <span id="apStatus" style="margin-left:8px;color:#555;"></span>
+      </div>
+      <div style="min-width:280px;">
+        <div style="font-weight:bold;">Другая сеть (клиент)</div>
+        <div>SSID: <input id="cli_set_ssid" placeholder="MyWiFi" /></div>
+        <div>Пароль: <input id="cli_set_pass" type="password" placeholder="Пароль Wi‑Fi" /></div>
+        <button onclick="saveClient()">Сохранить</button>
+        <span style="display:block;font-size:12px;color:#777;max-width:420px;">Примечание: режим не переключается автоматически. Эта настройка сохраняется в системе и будет использована при переходе в клиентский режим.</span>
+        <span id="cliStatus" style="margin-left:8px;color:#555;"></span>
+      </div>
+    </div>
+  </div>
   <div class="row">
     <b>Расписание:</b>
     <label><input type="checkbox" id="sch_enabled"> Вкл</label>
@@ -89,6 +118,7 @@ async function refresh(){
     document.getElementById('sch_on').value = j.schedule.on_time || '09:00';
     document.getElementById('sch_off').value = j.schedule.off_time || '21:00';
   }
+  await refreshNetwork();
 }
 
 async function stream(action){
@@ -154,6 +184,57 @@ async function saveSchedule(){
     if(!j.ok){ throw new Error(j.error||'Ошибка'); }
     st.textContent = 'сохранено';
     setTimeout(()=>{st.textContent='';}, 2000);
+  }catch(e){
+    st.textContent = 'ошибка: ' + e.message;
+  }
+}
+
+async function refreshNetwork(){
+  try{
+    const r = await fetch('/api/network/status');
+    const j = await r.json();
+    document.getElementById('net_mode').textContent = j.mode || 'unknown';
+    document.getElementById('ap_ssid').textContent = j.ap?.ssid || '—';
+    document.getElementById('cli_connected').textContent = j.client?.connected_ssid || '—';
+    document.getElementById('cli_ip').textContent = j.client?.ip || '—';
+    // Prefill inputs with current values
+    document.getElementById('ap_set_ssid').value = j.ap?.ssid || '';
+    document.getElementById('ap_set_pass').value = '';
+    document.getElementById('cli_set_ssid').value = j.client?.configured_ssid || '';
+  }catch(e){
+    // ignore
+  }
+}
+
+async function saveAp(){
+  const st = document.getElementById('apStatus');
+  const ssid = document.getElementById('ap_set_ssid').value.trim();
+  const pass = document.getElementById('ap_set_pass').value.trim();
+  st.textContent = 'сохранение…';
+  try{
+    const r = await fetch('/api/network/ap', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ssid, password: pass || undefined }) });
+    const j = await r.json();
+    if(!j.ok){ throw new Error(j.error||'Ошибка'); }
+    st.textContent = 'перезапуск AP… (переподключитесь при необходимости)';
+    setTimeout(()=>{ st.textContent=''; }, 5000);
+    setTimeout(refreshNetwork, 2500);
+  }catch(e){
+    st.textContent = 'ошибка: ' + e.message;
+  }
+}
+
+async function saveClient(){
+  const st = document.getElementById('cliStatus');
+  const ssid = document.getElementById('cli_set_ssid').value.trim();
+  const pass = document.getElementById('cli_set_pass').value.trim();
+  st.textContent = 'сохранение…';
+  try{
+    const r = await fetch('/api/network/client', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ssid, password: pass }) });
+    const j = await r.json();
+    if(!j.ok){ throw new Error(j.error||'Ошибка'); }
+    st.textContent = 'сохранено';
+    setTimeout(()=>{ st.textContent=''; }, 2000);
+    refreshNetwork();
   }catch(e){
     st.textContent = 'ошибка: ' + e.message;
   }

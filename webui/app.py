@@ -10,6 +10,8 @@ SERVICE_NAME = os.environ.get("STREAM_SERVICE", "quest-dual-v19.service")
 LEASES_FILE = "/var/lib/misc/dnsmasq.leases"
 BINDINGS_FILE = "/home/pi/quest-bindings.env"
 SCHEDULE_FILE = "/home/pi/stream_daemon/schedule.json"
+HOSTAPD_CONF = "/etc/hostapd/hostapd.conf"
+WPAS_CONF = "/etc/wpa_supplicant/wpa_supplicant.conf"
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -179,6 +181,125 @@ def write_schedule(enabled: bool, on_time: str, off_time: str):
     os.replace(tmp, SCHEDULE_FILE)
 
 
+# ------- Network (AP / Client) helpers -------
+def read_hostapd():
+    ssid = None
+    passwd = None
+    try:
+        if os.path.exists(HOSTAPD_CONF):
+            with open(HOSTAPD_CONF) as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if line.startswith('ssid='):
+                        ssid = line.split('=', 1)[1]
+                    elif line.startswith('wpa_passphrase='):
+                        passwd = line.split('=', 1)[1]
+    except Exception:
+        pass
+    return {"ssid": ssid or "", "password": passwd or ""}
+
+
+def write_hostapd(new_ssid: str, new_password: str | None):
+    if not os.path.exists(HOSTAPD_CONF):
+        raise FileNotFoundError(f"{HOSTAPD_CONF} not found")
+    new_ssid = (new_ssid or "").strip()
+    if not (1 <= len(new_ssid) <= 32):
+        raise ValueError("SSID length must be 1..32")
+    if new_password is not None and len(new_password) > 0 and not (8 <= len(new_password) <= 63):
+        raise ValueError("Password must be 8..63 characters or empty to keep current")
+
+    # Read and replace lines
+    with open(HOSTAPD_CONF) as f:
+        lines = f.readlines()
+    had_ssid = False
+    had_pass = False
+    for i, raw in enumerate(lines):
+        line = raw.lstrip()
+        if line.startswith('ssid=') and not raw.lstrip().startswith('#'):
+            lines[i] = raw.split('ssid=', 1)[0] + f"ssid={new_ssid}\n"
+            had_ssid = True
+        elif line.startswith('wpa_passphrase=') and not raw.lstrip().startswith('#'):
+            if new_password is not None and len(new_password) > 0:
+                lines[i] = raw.split('wpa_passphrase=', 1)[0] + f"wpa_passphrase={new_password}\n"
+            had_pass = True
+    # Insert if missing
+    if not had_ssid:
+        lines.append(f"\nssid={new_ssid}\n")
+    if not had_pass and new_password is not None and len(new_password) > 0:
+        lines.append(f"wpa_passphrase={new_password}\n")
+    tmp = HOSTAPD_CONF + ".tmp"
+    with open(tmp, 'w') as f:
+        f.writelines(lines)
+    os.replace(tmp, HOSTAPD_CONF)
+
+
+def read_client_wifi():
+    """Return configured and connected Wi‑Fi for client mode."""
+    configured_ssid = ""
+    try:
+        if os.path.exists(WPAS_CONF):
+            with open(WPAS_CONF) as f:
+                text = f.read()
+            # naive parse first occurrence of ssid="..." inside network={}
+            import re
+            m = re.search(r"network\s*=\s*\{[\s\S]*?ssid=\"([^\"]+)\"", text, re.MULTILINE)
+            if m:
+                configured_ssid = m.group(1)
+    except Exception:
+        pass
+    connected_ssid = sh("iwgetid -r || true").strip()
+    ip = sh("ip -4 addr show wlan0 | awk '/inet /{print $2}' | head -n1 || true").strip()
+    return {"configured_ssid": configured_ssid, "connected_ssid": connected_ssid, "ip": ip}
+
+
+def write_client_wifi(ssid: str, password: str):
+    ssid = (ssid or "").strip()
+    password = (password or "").strip()
+    if not (1 <= len(ssid) <= 32):
+        raise ValueError("Client SSID length must be 1..32")
+    if not (8 <= len(password) <= 63):
+        raise ValueError("Client password must be 8..63 characters")
+    # Generate PSK via wpa_passphrase for safety
+    psk_block = sh(f"wpa_passphrase {json.dumps(ssid)} {json.dumps(password)} | sed '1,2d' | sed '$d'")
+    # Ensure base header exists
+    base = "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\ncountry=PL\n\n"
+    existing = ""
+    if os.path.exists(WPAS_CONF):
+        try:
+            with open(WPAS_CONF) as f:
+                existing = f.read()
+        except Exception:
+            existing = ""
+    # Replace our managed block
+    start = "# BEGIN webui"
+    end = "# END webui"
+    import re
+    if start in existing and end in existing:
+        new = re.sub(r"# BEGIN webui[\s\S]*# END webui", f"{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}", existing)
+    else:
+        if existing.strip():
+            new = existing.strip() + f"\n\n{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}\n"
+        else:
+            new = base + f"{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}\n"
+    tmp = WPAS_CONF + ".tmp"
+    with open(tmp, 'w') as f:
+        f.write(new)
+    os.replace(tmp, WPAS_CONF)
+
+
+def network_mode():
+    # If hostapd active -> AP mode. Else if associated -> client.
+    ap_active = sh("systemctl is-active hostapd || true").strip() == "active"
+    if ap_active:
+        return "ap"
+    ssid = sh("iwgetid -r || true").strip()
+    if ssid:
+        return "client"
+    return "unknown"
+
+
 @app.get("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -265,6 +386,56 @@ def api_swap_bindings():
 def api_display_reset():
     res = xrandr_arrange_side_by_side()
     return jsonify(res)
+
+
+@app.get("/api/network/status")
+def api_network_status():
+    mode = network_mode()
+    ap = read_hostapd()
+    cli = read_client_wifi()
+    # Do not expose plain AP password in API
+    ap_masked = {"ssid": ap.get("ssid", ""), "password": "***" if ap.get("password") else ""}
+    return jsonify({
+        "mode": mode,
+        "ap": ap_masked,
+        "client": cli,
+    })
+
+
+@app.post("/api/network/ap")
+def api_network_ap_update():
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        data = {}
+    ssid = (data.get("ssid") or "").strip()
+    password = data.get("password")
+    if password is not None:
+        password = password.strip()
+    try:
+        write_hostapd(ssid, password)
+        # Restart AP services to apply
+        out1 = sh("sudo systemctl restart hostapd")
+        out2 = sh("sudo systemctl restart dnsmasq || true")
+        return jsonify({"ok": True, "out": out1 + "\n" + out2})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.post("/api/network/client")
+def api_network_client_update():
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        data = {}
+    ssid = (data.get("ssid") or "").strip()
+    password = (data.get("password") or "").strip()
+    try:
+        write_client_wifi(ssid, password)
+        # Do not switch mode automatically; just report success
+        return jsonify({"ok": True, "configured": read_client_wifi()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 if __name__ == "__main__":
