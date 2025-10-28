@@ -1,0 +1,16 @@
+[Unit]
+Description=Web UI for AR streaming control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/webui
+Environment=WEBUI_PORT=8080
+ExecStart=/home/pi/webui/.venv/bin/python /home/pi/webui/app.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

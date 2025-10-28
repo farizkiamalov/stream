@@ -1,0 +1,13 @@
+[Unit]
+Description=Quest stream scheduler (start/stop by time)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Environment=STREAM_SERVICE=quest-dual-v19.service
+ExecStart=/usr/bin/env python3 /home/pi/scripts/stream_scheduler.py
+
+[Install]
+WantedBy=multi-user.target

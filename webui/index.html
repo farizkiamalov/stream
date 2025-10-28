@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ArHotspot1 — панель управления</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 20px; }
+    h1 { margin-bottom: 0.2rem; }
+    button { margin-right: 8px; }
+    .row { margin: 12px 0; }
+    pre { background:#111; color:#0f0; padding:10px; border-radius:6px; max-height:240px; overflow:auto;}
+    table { border-collapse: collapse; }
+    th, td { border:1px solid #ccc; padding:6px 8px; }
+  </style>
+</head>
+<body>
+  <h1>ArHotspot1 — панель управления</h1>
+  <div class="row">
+    <button onclick="stream('start')">Стрим ВКЛ</button>
+    <button onclick="stream('stop')">Стрим ВЫКЛ</button>
+    <button onclick="stream('restart')">Перезапуск</button>
+    <button onclick="refresh()">Обновить статус</button>
+    <button onclick="swapBindings()">Поменять экраны местами</button>
+    <button onclick="resetDisplay()">Сбросить вывод (xrandr)</button>
+  </div>
+  <div class="row">
+    <b>CPU:</b> <span id="cpu">…</span>%
+    &nbsp; | &nbsp;
+    <b>Температура:</b> <span id="temp">…</span> °C
+    &nbsp; | &nbsp;
+    <b>Сервис:</b> <span id="svc">…</span>
+    &nbsp; | &nbsp;
+    <b>Расписание:</b> <span id="schsum">…</span>
+  </div>
+  <div class="row">
+    <b>Клиенты (wlan0):</b>
+    <table id="clients"><thead><tr><th>IP</th><th>MAC</th><th>Имя</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="row">
+    <b>Расписание:</b>
+    <label><input type="checkbox" id="sch_enabled"> Вкл</label>
+    &nbsp;
+    С <input id="sch_on" type="time" value="09:00"> до <input id="sch_off" type="time" value="21:00">
+    <button onclick="saveSchedule()">Сохранить</button>
+    <span id="schStatus" style="margin-left:8px;color:#555;"></span>
+  </div>
+  <div class="row">
+    <b>Экраны:</b>
+    <div>
+      <label><input type="radio" name="q3pos" value="left"> Q3 слева, Q3S справа</label>
+      &nbsp;
+      <label><input type="radio" name="q3pos" value="right"> Q3 справа, Q3S слева</label>
+      &nbsp;
+      <button onclick="saveBindings()">Сохранить и применить</button>
+      <span id="bindStatus" style="margin-left:8px;color:#555;"></span>
+    </div>
+  </div>
+  <pre id="log"></pre>
+
+<script>
+async function refresh(){
+  const r = await fetch('/api/status');
+  const j = await r.json();
+  document.getElementById('cpu').textContent = j.cpu_percent ?? '—';
+  document.getElementById('temp').textContent = j.cpu_temp_c ?? '—';
+  document.getElementById('svc').textContent = `${j.service.active}/${j.service.enabled}`;
+  // schedule summary
+  const ss = document.getElementById('schsum');
+  if (j.schedule && j.schedule.enabled) {
+    ss.textContent = `${j.schedule.on_time}–${j.schedule.off_time}`;
+  } else {
+    ss.textContent = 'выкл';
+  }
+  // bindings
+  const pos = j.bindings?.q3_position || 'left';
+  const radios = document.querySelectorAll('input[name="q3pos"]');
+  radios.forEach(r=>{ r.checked = (r.value === pos); });
+  const tbody = document.querySelector('#clients tbody');
+  tbody.innerHTML = '';
+  (j.clients||[]).forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${c.ip}</td><td>${c.mac}</td><td>${c.name}</td>`;
+    tbody.appendChild(tr);
+  });
+  // schedule
+  if(j.schedule){
+    document.getElementById('sch_enabled').checked = !!j.schedule.enabled;
+    document.getElementById('sch_on').value = j.schedule.on_time || '09:00';
+    document.getElementById('sch_off').value = j.schedule.off_time || '21:00';
+  }
+}
+
+async function stream(action){
+  const r = await fetch(`/api/stream/${action}`, { method:'POST' });
+  const j = await r.json();
+  const el = document.getElementById('log');
+  el.textContent = `[${new Date().toLocaleTimeString()}] ${action.toUpperCase()} => ${JSON.stringify(j)}\n` + el.textContent;
+  refresh();
+}
+
+async function saveBindings(){
+  const pos = document.querySelector('input[name="q3pos"]:checked')?.value || 'left';
+  const st = document.getElementById('bindStatus');
+  st.textContent = 'сохранение…';
+  try{
+    const r = await fetch('/api/bindings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ q3_position: pos }) });
+    const j = await r.json();
+    if(!j.ok){ throw new Error(j.error||'Ошибка'); }
+    st.textContent = 'перезапуск стрима…';
+    await fetch('/api/stream/restart', { method:'POST' });
+    st.textContent = 'применено';
+    setTimeout(()=>{ st.textContent=''; }, 3000);
+    refresh();
+  }catch(e){
+    st.textContent = 'ошибка: ' + e.message;
+  }
+}
+
+async function swapBindings(){
+  const st = document.getElementById('bindStatus');
+  st.textContent = 'меняем местами…';
+  try{
+    const r = await fetch('/api/bindings/swap', { method:'POST' });
+    const j = await r.json();
+    if(!j.ok){ throw new Error(j.error||'Ошибка'); }
+    st.textContent = 'перезапуск стрима…';
+    await fetch('/api/stream/restart', { method:'POST' });
+    st.textContent = 'готово';
+    setTimeout(()=>{ st.textContent=''; }, 2000);
+    refresh();
+  }catch(e){
+    st.textContent = 'ошибка: ' + e.message;
+  }
+}
+
+async function resetDisplay(){
+  const el = document.getElementById('log');
+  el.textContent = `[${new Date().toLocaleTimeString()}] DISPLAY RESET\n` + el.textContent;
+  const r = await fetch('/api/display/reset', { method:'POST' });
+  const j = await r.json();
+  el.textContent = `[${new Date().toLocaleTimeString()}] ${JSON.stringify(j)}\n` + el.textContent;
+}
+
+async function saveSchedule(){
+  const st = document.getElementById('schStatus');
+  const enabled = document.getElementById('sch_enabled').checked;
+  const on_time = document.getElementById('sch_on').value;
+  const off_time = document.getElementById('sch_off').value;
+  st.textContent = 'сохранение…';
+  try{
+    const r = await fetch('/api/schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled, on_time, off_time }) });
+    const j = await r.json();
+    if(!j.ok){ throw new Error(j.error||'Ошибка'); }
+    st.textContent = 'сохранено';
+    setTimeout(()=>{st.textContent='';}, 2000);
+  }catch(e){
+    st.textContent = 'ошибка: ' + e.message;
+  }
+}
+
+refresh();
+</script>
+</body>
+</html>

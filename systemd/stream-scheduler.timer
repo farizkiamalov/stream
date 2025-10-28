@@ -1,0 +1,11 @@
+[Unit]
+Description=Run stream scheduler every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=stream-scheduler.service
+
+[Install]
+WantedBy=timers.target

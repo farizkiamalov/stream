@@ -1,0 +1,15 @@
+[Unit]
+Description=Display hotplug watcher (xrandr auto-arrange + stream restart)
+After=graphical.target
+
+[Service]
+Type=simple
+User=pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+ExecStart=/bin/bash /home/pi/scripts/display_watcher.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Quest dual scrcpy watchdog (v19)
+After=graphical.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=SDL_VIDEODRIVER=x11
+Environment=SDL_RENDER_VSYNC=0
+Environment=LIBGL_ALWAYS_SOFTWARE=0
+ExecStart=/home/pi/quest-dual-v19.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target

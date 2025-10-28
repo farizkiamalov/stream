@@ -1,0 +1,5 @@
+webui/.venv/
+__pycache__/
+*.pyc
+*.log
+config/scheduler_state.json
