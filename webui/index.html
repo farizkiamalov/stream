@@ -45,6 +45,10 @@
       <b>AP SSID:</b> <span id="ap_ssid">…</span>
       &nbsp;|&nbsp;
       <b>WAN:</b> <span id="wan_line">—</span>
+      &nbsp;|&nbsp;
+      <b>Интернет:</b> <span id="wan_inet">—</span>
+      &nbsp;|&nbsp;
+      <b>Сигнал:</b> <span id="wan_signal">—</span>
     </div>
     <div style="display:flex; gap:24px; flex-wrap:wrap;">
       <div style="min-width:280px;">
@@ -197,6 +201,11 @@ async function refreshNetwork(){
   const wan = j.client;
   const wanLine = (wan?.wan_dev ? (wan.wan_dev + (wan?.wan_ssid? ` (${wan.wan_ssid})`:'') + (wan?.wan_ip? ` ${wan.wan_ip}`:'') + (wan?.wan_gw? ` → ${wan.wan_gw}`:'')) : '—');
   document.getElementById('wan_line').textContent = wanLine;
+  const inet = j.internet;
+  document.getElementById('wan_inet').textContent = (inet?.ok ? (`OK ${Math.round(inet.ms)} ms via ${inet.host}`) : 'нет');
+  const sig = (wan?.signal_dbm != null ? `${wan.signal_dbm} dBm` : '—');
+  const rate = (wan?.tx_bitrate_mbps ? `, tx ${wan.tx_bitrate_mbps} Mbps` : '') + (wan?.rx_bitrate_mbps ? `, rx ${wan.rx_bitrate_mbps} Mbps` : '');
+  document.getElementById('wan_signal').textContent = sig + rate;
     // Prefill inputs with current values
     document.getElementById('ap_set_ssid').value = j.ap?.ssid || '';
     document.getElementById('ap_set_pass').value = '';

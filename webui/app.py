@@ -316,6 +316,52 @@ def network_mode():
     return "unknown"
 
 
+def internet_ping():
+    """Ping a couple of well-known hosts and return first success latency in ms."""
+    for host in ("1.1.1.1", "8.8.8.8"):
+        cmd = "ping -c1 -w2 -n %s 2>/dev/null | awk -F'time=' '/time=/{print $2}' | awk '{print $1}' | head -n1" % host
+        out = sh(cmd)
+        try:
+            if out:
+                ms = float(out)
+                return {"ok": True, "ms": ms, "host": host}
+        except Exception:
+            pass
+    return {"ok": False, "ms": None, "host": None}
+
+
+def wan_wireless_stats(dev: str):
+    """Return signal dBm and bitrate for a wireless WAN interface."""
+    if not dev or not dev.startswith("wl"):
+        return {"signal_dbm": None, "tx_bitrate_mbps": None, "rx_bitrate_mbps": None}
+    out = sh(f"iw dev {dev} link || true")
+    import re
+    sig = None
+    tx = None
+    rx = None
+    for line in out.splitlines():
+        line = line.strip()
+        m = re.search(r"signal:\s*(-?\d+)\s*dBm", line)
+        if m:
+            try:
+                sig = int(m.group(1))
+            except Exception:
+                pass
+        m = re.search(r"tx bitrate:\s*([0-9.]+)\s*MBit/s", line)
+        if m:
+            try:
+                tx = float(m.group(1))
+            except Exception:
+                pass
+        m = re.search(r"rx bitrate:\s*([0-9.]+)\s*MBit/s", line)
+        if m:
+            try:
+                rx = float(m.group(1))
+            except Exception:
+                pass
+    return {"signal_dbm": sig, "tx_bitrate_mbps": tx, "rx_bitrate_mbps": rx}
+
+
 @app.get("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -409,12 +455,17 @@ def api_network_status():
     mode = network_mode()
     ap = read_hostapd()
     cli = read_client_wifi()
+    # Attach WAN wireless stats if applicable
+    if cli.get("wan_dev"):
+        cli.update(wan_wireless_stats(cli.get("wan_dev")))
     # Do not expose plain AP password in API
     ap_masked = {"ssid": ap.get("ssid", ""), "password": "***" if ap.get("password") else ""}
+    inet = internet_ping()
     return jsonify({
         "mode": mode,
         "ap": ap_masked,
         "client": cli,
+        "internet": inet,
     })
 
 
