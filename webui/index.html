@@ -44,9 +44,7 @@
       &nbsp;|&nbsp;
       <b>AP SSID:</b> <span id="ap_ssid">…</span>
       &nbsp;|&nbsp;
-      <b>Подключено к (клиент):</b> <span id="cli_connected">—</span>
-      &nbsp;|&nbsp;
-      <b>IP wlan0:</b> <span id="cli_ip">—</span>
+      <b>WAN:</b> <span id="wan_line">—</span>
     </div>
     <div style="display:flex; gap:24px; flex-wrap:wrap;">
       <div style="min-width:280px;">
@@ -58,9 +56,10 @@
       </div>
       <div style="min-width:280px;">
         <div style="font-weight:bold;">Другая сеть (клиент)</div>
-        <div>SSID: <input id="cli_set_ssid" placeholder="MyWiFi" /></div>
-        <div>Пароль: <input id="cli_set_pass" type="password" placeholder="Пароль Wi‑Fi" /></div>
-        <button onclick="saveClient()">Сохранить</button>
+  <div>SSID: <input id="cli_set_ssid" placeholder="MyWiFi" /></div>
+  <div>Пароль: <input id="cli_set_pass" type="password" placeholder="Пароль Wi‑Fi" /></div>
+  <label style="display:inline-block;margin:6px 0;"><input type="checkbox" id="cli_apply_now"> Применить сейчас (wlan1)</label>
+  <button onclick="saveClient()">Сохранить</button>
         <span style="display:block;font-size:12px;color:#777;max-width:420px;">Примечание: режим не переключается автоматически. Эта настройка сохраняется в системе и будет использована при переходе в клиентский режим.</span>
         <span id="cliStatus" style="margin-left:8px;color:#555;"></span>
       </div>
@@ -195,12 +194,13 @@ async function refreshNetwork(){
     const j = await r.json();
     document.getElementById('net_mode').textContent = j.mode || 'unknown';
     document.getElementById('ap_ssid').textContent = j.ap?.ssid || '—';
-    document.getElementById('cli_connected').textContent = j.client?.connected_ssid || '—';
-    document.getElementById('cli_ip').textContent = j.client?.ip || '—';
+  const wan = j.client;
+  const wanLine = (wan?.wan_dev ? (wan.wan_dev + (wan?.wan_ssid? ` (${wan.wan_ssid})`:'') + (wan?.wan_ip? ` ${wan.wan_ip}`:'') + (wan?.wan_gw? ` → ${wan.wan_gw}`:'')) : '—');
+  document.getElementById('wan_line').textContent = wanLine;
     // Prefill inputs with current values
     document.getElementById('ap_set_ssid').value = j.ap?.ssid || '';
     document.getElementById('ap_set_pass').value = '';
-    document.getElementById('cli_set_ssid').value = j.client?.configured_ssid || '';
+  document.getElementById('cli_set_ssid').value = wan?.configured_ssid || '';
   }catch(e){
     // ignore
   }
@@ -227,12 +227,13 @@ async function saveClient(){
   const st = document.getElementById('cliStatus');
   const ssid = document.getElementById('cli_set_ssid').value.trim();
   const pass = document.getElementById('cli_set_pass').value.trim();
+  const apply_now = document.getElementById('cli_apply_now').checked;
   st.textContent = 'сохранение…';
   try{
-    const r = await fetch('/api/network/client', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ssid, password: pass }) });
+    const r = await fetch('/api/network/client', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ssid, password: pass, apply_now }) });
     const j = await r.json();
     if(!j.ok){ throw new Error(j.error||'Ошибка'); }
-    st.textContent = 'сохранено';
+    st.textContent = apply_now ? 'переподключаемся…' : 'сохранено';
     setTimeout(()=>{ st.textContent=''; }, 2000);
     refreshNetwork();
   }catch(e){

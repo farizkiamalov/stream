@@ -236,22 +236,38 @@ def write_hostapd(new_ssid: str, new_password: str | None):
 
 
 def read_client_wifi():
-    """Return configured and connected Wi‑Fi for client mode."""
+    """Return configured Wi‑Fi and current WAN info (interface, IP, gateway, SSID if wireless)."""
     configured_ssid = ""
     try:
         if os.path.exists(WPAS_CONF):
             with open(WPAS_CONF) as f:
                 text = f.read()
-            # naive parse first occurrence of ssid="..." inside network={}
+            # naive parse first occurrence of ssid=\"...\" inside network={}
             import re
             m = re.search(r"network\s*=\s*\{[\s\S]*?ssid=\"([^\"]+)\"", text, re.MULTILINE)
             if m:
                 configured_ssid = m.group(1)
     except Exception:
         pass
-    connected_ssid = sh("iwgetid -r || true").strip()
-    ip = sh("ip -4 addr show wlan0 | awk '/inet /{print $2}' | head -n1 || true").strip()
-    return {"configured_ssid": configured_ssid, "connected_ssid": connected_ssid, "ip": ip}
+
+    # Detect WAN (default route)
+    route = sh("ip route show default | head -n1 || true").strip()
+    wan_dev = ""
+    gw = ""
+    if route:
+        parts = route.split()
+        # default via <gw> dev <dev>
+        try:
+            if "via" in parts:
+                gw = parts[parts.index("via") + 1]
+            if "dev" in parts:
+                wan_dev = parts[parts.index("dev") + 1]
+        except Exception:
+            pass
+    wan_ip = sh("ip -4 addr show $(ip route show default | awk '/default/ {print $5; exit}') | awk '/inet /{print $2; exit}' || true").strip()
+    # If WAN is wireless, get SSID via iwgetid <dev> -r
+    wan_ssid = sh("dev=$(ip route show default | awk '/default/ {print $5; exit}'); [ -n \"$dev\" ] && iwgetid $dev -r || true").strip()
+    return {"configured_ssid": configured_ssid, "wan_dev": wan_dev, "wan_ip": wan_ip, "wan_gw": gw, "wan_ssid": wan_ssid}
 
 
 def write_client_wifi(ssid: str, password: str):
@@ -430,10 +446,18 @@ def api_network_client_update():
         data = {}
     ssid = (data.get("ssid") or "").strip()
     password = (data.get("password") or "").strip()
+    apply_now = bool(data.get("apply_now", False))
     try:
         write_client_wifi(ssid, password)
-        # Do not switch mode automatically; just report success
-        return jsonify({"ok": True, "configured": read_client_wifi()})
+        out = ""
+        if apply_now:
+            # Try to reconfigure wlan1 without touching AP on wlan0
+            out += sh("sudo systemctl restart wpa_supplicant@wlan1 || true") + "\n"
+            out += sh("sudo wpa_cli -i wlan1 reconfigure || true") + "\n"
+            # Renew DHCP on wlan1 (dhclient preferred, fallback dhcpcd)
+            out += sh("sudo dhclient -r wlan1 || true") + "\n"
+            out += sh("sudo dhclient wlan1 || sudo dhcpcd -n wlan1 || true") + "\n"
+        return jsonify({"ok": True, "configured": read_client_wifi(), "out": out.strip()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
