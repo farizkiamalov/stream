@@ -299,10 +299,18 @@ def write_client_wifi(ssid: str, password: str):
             new = existing.strip() + f"\n\n{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}\n"
         else:
             new = base + f"{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}\n"
-    tmp = WPAS_CONF + ".tmp"
-    with open(tmp, 'w') as f:
-        f.write(new)
-    os.replace(tmp, WPAS_CONF)
+    # Write to /tmp first, then sudo mv into place
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="wpa_supplicant_", suffix=".conf", text=True)
+    try:
+        with os.fdopen(tmp_fd, 'w') as f:
+            f.write(new)
+        sh(f"sudo mv {tmp_path} {WPAS_CONF}")
+        sh(f"sudo chmod 600 {WPAS_CONF}")
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 def network_mode():
