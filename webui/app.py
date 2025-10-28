@@ -11,7 +11,7 @@ LEASES_FILE = "/var/lib/misc/dnsmasq.leases"
 BINDINGS_FILE = "/home/pi/quest-bindings.env"
 SCHEDULE_FILE = "/home/pi/stream_daemon/schedule.json"
 HOSTAPD_CONF = "/etc/hostapd/hostapd.conf"
-WPAS_CONF = "/etc/wpa_supplicant/wpa_supplicant.conf"
+WPAS_CONF = "/etc/wpa_supplicant/wpa_supplicant-wlan1.conf"
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
