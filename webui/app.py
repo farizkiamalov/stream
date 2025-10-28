@@ -279,26 +279,9 @@ def write_client_wifi(ssid: str, password: str):
         raise ValueError("Client password must be 8..63 characters")
     # Generate PSK via wpa_passphrase for safety
     psk_block = sh(f"wpa_passphrase {json.dumps(ssid)} {json.dumps(password)} | sed '1,2d' | sed '$d'")
-    # Ensure base header exists
-    base = "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\ncountry=PL\n\n"
-    existing = ""
-    if os.path.exists(WPAS_CONF):
-        try:
-            with open(WPAS_CONF) as f:
-                existing = f.read()
-        except Exception:
-            existing = ""
-    # Replace our managed block
-    start = "# BEGIN webui"
-    end = "# END webui"
-    import re
-    if start in existing and end in existing:
-        new = re.sub(r"# BEGIN webui[\s\S]*# END webui", f"{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}", existing)
-    else:
-        if existing.strip():
-            new = existing.strip() + f"\n\n{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}\n"
-        else:
-            new = base + f"{start}\nnetwork={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n{end}\n"
+    # Always write clean config with only the new network (remove all old networks)
+    base = "ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev\nupdate_config=1\ncountry=PL\n\n"
+    new = base + f"network={{\n    ssid=\"{ssid}\"\n{psk_block}\n}}\n"
     # Write to /tmp first, then sudo mv into place
     import tempfile
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="wpa_supplicant_", suffix=".conf", text=True)
